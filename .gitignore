@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build
+client/dist/
+server/dist/
+build/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Puppeteer
+.cache/
+
+# Claude Code
+.claude/
+
+# ローカルバックアップ
+backup/
+
+# 旧要件定義書（後日最新版を作成予定）
+要件定義書_見積請求管理アプリ.pdf

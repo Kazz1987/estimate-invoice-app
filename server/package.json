@@ -1,0 +1,21 @@
+{
+  "name": "estimate-invoice-server",
+  "version": "1.0.0",
+  "description": "見積〜請求管理アプリ バックエンド",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "mysql2": "^3.22.5",
+    "puppeteer-core": "^25.1.0"
+  }
+}
