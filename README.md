@@ -12,7 +12,14 @@
 
 ## 📸 スクリーンショット
 
-[ダッシュボード / 見積書一覧 / PDF出力 のスクリーンショットを挿入]
+**ダッシュボード**
+![ダッシュボード](docs/images/dashboard.png)
+
+**見積書一覧**
+![見積書一覧](docs/images/estimate-list.png)
+
+**PDF出力結果**
+![PDF出力結果](docs/images/pdf-sample.png)
 
 ## 主な機能
 
