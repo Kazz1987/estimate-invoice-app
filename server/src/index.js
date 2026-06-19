@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import { testConnection } from './config/database.js';
+import { testConnection, describeDbError } from './config/database.js';
 import customersRouter from './routes/customers.js';
 import itemCategoriesRouter from './routes/itemCategories.js';
 import estimatesRouter from './routes/estimates.js';
@@ -28,7 +28,7 @@ app.get('/api/health', async (req, res) => {
     res.status(503).json({
       status: 'error',
       message: '見積〜請求管理API',
-      database: { connected: false, error: error.message },
+      database: { connected: false, error: describeDbError(error) },
     });
   }
 });
