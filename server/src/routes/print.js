@@ -89,6 +89,7 @@ router.get('/estimates/:id/pdf', async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
     res.send(pdf);
   } catch (error) {
+    console.error('[print] 見積書PDF生成失敗:', error);
     res.status(500).json({ error: 'サーバーエラーが発生しました' });
   }
 });
@@ -120,6 +121,7 @@ router.get('/invoices/:id/pdf', async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
     res.send(pdf);
   } catch (error) {
+    console.error('[print] 請求書PDF生成失敗:', error);
     res.status(500).json({ error: 'サーバーエラーが発生しました' });
   }
 });

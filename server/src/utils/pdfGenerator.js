@@ -13,7 +13,11 @@ const BROWSER_PATHS = [
 
 function findBrowser() {
   if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    return process.env.PUPPETEER_EXECUTABLE_PATH;
+    const envPath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    console.error(
+      `[pdfGenerator] PUPPETEER_EXECUTABLE_PATH=${envPath} (存在: ${existsSync(envPath)})`
+    );
+    return envPath;
   }
 
   for (const p of BROWSER_PATHS) {
@@ -27,11 +31,20 @@ function findBrowser() {
 export async function htmlToPdf(html) {
   const executablePath = findBrowser();
 
-  const browser = await puppeteer.launch({
-    executablePath,
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-  });
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      executablePath,
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    });
+  } catch (error) {
+    console.error('[pdfGenerator] Puppeteer起動失敗');
+    console.error(`[pdfGenerator] executablePath=${executablePath} (存在: ${existsSync(executablePath)})`);
+    console.error(`[pdfGenerator] error.message: ${error.message}`);
+    console.error(`[pdfGenerator] error.stack: ${error.stack}`);
+    throw error;
+  }
 
   try {
     const page = await browser.newPage();
@@ -42,6 +55,11 @@ export async function htmlToPdf(html) {
       margin: { top: '12mm', right: '14mm', bottom: '12mm', left: '14mm' },
     });
     return pdf;
+  } catch (error) {
+    console.error('[pdfGenerator] PDF生成失敗');
+    console.error(`[pdfGenerator] error.message: ${error.message}`);
+    console.error(`[pdfGenerator] error.stack: ${error.stack}`);
+    throw error;
   } finally {
     await browser.close();
   }
