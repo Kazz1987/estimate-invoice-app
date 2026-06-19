@@ -1,3 +1,26 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const FONT_PATH = join(__dirname, '..', '..', 'assets', 'fonts', 'NotoSansJP-Variable.ttf');
+
+// Render(Linux)には日本語フォントが入っておらず、システムフォントに依存すると
+// 文字が欠落するため、@font-faceでフォントファイルをbase64埋め込みし
+// OSのフォント設定(fontconfig)に依存せずChromeに直接読ませる。
+let fontFaceCss = '';
+try {
+  const fontBase64 = readFileSync(FONT_PATH).toString('base64');
+  fontFaceCss = `
+  @font-face {
+    font-family: 'NotoSansJP';
+    src: url(data:font/ttf;base64,${fontBase64}) format('truetype-variations');
+    font-weight: 100 900;
+  }`;
+} catch {
+  // フォントファイルが見つからない場合はシステムフォントにフォールバックする
+}
+
 /**
  * 見積書・請求書共通HTMLテンプレート
  * type: 'estimate' | 'invoice'
@@ -60,9 +83,10 @@ export function buildDocumentHtml(doc, type, company) {
 <meta charset="UTF-8">
 <title>${title} ${docNumber}</title>
 <style>
+  ${fontFaceCss}
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: 'Hiragino Kaku Gothic Pro', 'Meiryo', 'MS PGothic', sans-serif;
+    font-family: 'NotoSansJP', 'Hiragino Kaku Gothic Pro', 'Meiryo', 'MS PGothic', sans-serif;
     font-size: 11pt;
     color: #1a1a1a;
     background: #fff;
