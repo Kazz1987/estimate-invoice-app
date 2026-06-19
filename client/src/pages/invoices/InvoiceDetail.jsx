@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { fetchInvoiceById, updatePaymentStatus } from '../../services/invoiceService';
+import { API_BASE_URL } from '../../services/apiBase.js';
 
 const fmtDate = (d) => {
   if (!d) return '—';
@@ -143,13 +144,13 @@ export default function InvoiceDetail() {
             </button>
           </Link>
           <button
-            onClick={() => window.open(`http://localhost:3001/api/print/invoices/${id}/print`, '_blank')}
+            onClick={() => window.open(`${API_BASE_URL}/api/print/invoices/${id}/print`, '_blank')}
             style={{ padding: '6px 16px', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}
           >
             🖨 印刷
           </button>
           <button
-            onClick={() => window.open(`http://localhost:3001/api/print/invoices/${id}/pdf`, '_blank')}
+            onClick={() => window.open(`${API_BASE_URL}/api/print/invoices/${id}/pdf`, '_blank')}
             style={{ padding: '6px 16px', background: '#1e40af', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}
           >
             PDF出力

@@ -1,4 +1,6 @@
-const BASE = 'http://localhost:3001/api/customers';
+import { API_BASE_URL } from './apiBase.js';
+
+const BASE = `${API_BASE_URL}/api/customers`;
 
 export async function fetchCustomers({ search = '', page = 1, limit = 20 } = {}) {
   const params = new URLSearchParams({ search, page, limit });

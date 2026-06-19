@@ -1,4 +1,6 @@
-const BASE = 'http://localhost:3001/api/settings';
+import { API_BASE_URL } from './apiBase.js';
+
+const BASE = `${API_BASE_URL}/api/settings`;
 
 export async function fetchSettings() {
   const res = await fetch(BASE);

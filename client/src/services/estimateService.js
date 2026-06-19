@@ -1,4 +1,6 @@
-const BASE = 'http://localhost:3001/api/estimates';
+import { API_BASE_URL } from './apiBase.js';
+
+const BASE = `${API_BASE_URL}/api/estimates`;
 
 export async function fetchEstimates({ search = '', page = 1, limit = 20, date_from = '', date_to = '', customer_id = '' } = {}) {
   const params = new URLSearchParams({ search, page, limit });

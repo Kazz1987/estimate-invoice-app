@@ -1,4 +1,6 @@
-const BASE = 'http://localhost:3001/api/item-categories';
+import { API_BASE_URL } from './apiBase.js';
+
+const BASE = `${API_BASE_URL}/api/item-categories`;
 
 export async function fetchCategories() {
   const res = await fetch(BASE);

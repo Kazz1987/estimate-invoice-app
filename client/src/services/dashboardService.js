@@ -1,4 +1,6 @@
-const BASE = 'http://localhost:3001/api/dashboard';
+import { API_BASE_URL } from './apiBase.js';
+
+const BASE = `${API_BASE_URL}/api/dashboard`;
 
 export async function fetchDashboardSummary({ date_from = '', date_to = '' } = {}) {
   const params = new URLSearchParams();
