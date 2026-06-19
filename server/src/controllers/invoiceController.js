@@ -1,13 +1,14 @@
 import pool from '../config/database.js';
 import { isValidDateStr, isValidId } from '../utils/validation.js';
 
-async function genInvoiceNumber(conn) {
+async function genInvoiceNumber(client) {
   const year = new Date().getFullYear();
-  const [[{ maxNum }]] = await conn.query(
-    "SELECT MAX(CAST(SUBSTRING_INDEX(invoice_number, '-', -1) AS UNSIGNED)) AS maxNum FROM invoices WHERE invoice_number LIKE ?",
+  const { rows } = await client.query(
+    `SELECT MAX(CAST(split_part(invoice_number, '-', 3) AS INTEGER)) AS "maxNum"
+     FROM invoices WHERE invoice_number LIKE $1`,
     [`INV-${year}-%`]
   );
-  const seq = String((maxNum || 0) + 1).padStart(4, '0');
+  const seq = String((rows[0].maxNum || 0) + 1).padStart(4, '0');
   return `INV-${year}-${seq}`;
 }
 
@@ -28,13 +29,15 @@ export async function getInvoices(req, res) {
     const offset = (Number(page) - 1) * Number(limit);
     const like = `%${search}%`;
 
-    let where = '(inv.invoice_number LIKE ? OR inv.title LIKE ? OR c.name LIKE ?)';
+    let where = '(inv.invoice_number ILIKE $1 OR inv.title ILIKE $2 OR c.name ILIKE $3)';
     const params = [like, like, like];
-    if (date_from) { where += ' AND inv.issue_date >= ?'; params.push(date_from); }
-    if (date_to)   { where += ' AND inv.issue_date <= ?'; params.push(date_to); }
-    if (customer_id) { where += ' AND inv.customer_id = ?'; params.push(customer_id); }
+    if (date_from) { params.push(date_from); where += ` AND inv.issue_date >= $${params.length}`; }
+    if (date_to)   { params.push(date_to); where += ` AND inv.issue_date <= $${params.length}`; }
+    if (customer_id) { params.push(customer_id); where += ` AND inv.customer_id = $${params.length}`; }
 
-    const [rows] = await pool.query(`
+    const limitIdx = params.length + 1;
+    const offsetIdx = params.length + 2;
+    const { rows } = await pool.query(`
       SELECT inv.id, inv.invoice_number, inv.title,
              inv.issue_date, inv.due_date, inv.total,
              inv.payment_status, inv.paid_date,
@@ -45,17 +48,17 @@ export async function getInvoices(req, res) {
       JOIN estimates e  ON e.id  = inv.estimate_id
       WHERE ${where}
       ORDER BY inv.id DESC
-      LIMIT ? OFFSET ?
+      LIMIT $${limitIdx} OFFSET $${offsetIdx}
     `, [...params, Number(limit), offset]);
 
-    const [[{ total }]] = await pool.query(`
+    const { rows: totalRows } = await pool.query(`
       SELECT COUNT(*) AS total
       FROM invoices inv
       JOIN customers c ON c.id = inv.customer_id
       WHERE ${where}
     `, params);
 
-    res.json({ invoices: rows, total, page: Number(page), limit: Number(limit) });
+    res.json({ invoices: rows, total: totalRows[0].total, page: Number(page), limit: Number(limit) });
   } catch (error) {
     res.status(500).json({ error: 'サーバーエラーが発生しました' });
   }
@@ -64,7 +67,7 @@ export async function getInvoices(req, res) {
 export async function getInvoiceById(req, res) {
   try {
     const { id } = req.params;
-    const [[invoice]] = await pool.query(`
+    const { rows: invoiceRows } = await pool.query(`
       SELECT inv.id, inv.invoice_number, inv.title,
              inv.customer_id, inv.estimate_id,
              inv.issue_date, inv.due_date,
@@ -77,16 +80,17 @@ export async function getInvoiceById(req, res) {
       FROM invoices inv
       JOIN customers c ON c.id  = inv.customer_id
       JOIN estimates e ON e.id  = inv.estimate_id
-      WHERE inv.id = ?
+      WHERE inv.id = $1
     `, [id]);
+    const invoice = invoiceRows[0];
     if (!invoice) return res.status(404).json({ error: '請求書が見つかりません' });
 
-    const [items] = await pool.query(`
+    const { rows: items } = await pool.query(`
       SELECT id, line_number, estimate_item_id,
              category_name, item_name, description,
              quantity, unit, unit_price, amount
       FROM invoice_items
-      WHERE invoice_id = ?
+      WHERE invoice_id = $1
       ORDER BY line_number
     `, [id]);
 
@@ -102,40 +106,42 @@ export async function createFromEstimate(req, res) {
     if (!estimate_id) return res.status(400).json({ error: '見積書IDは必須です' });
 
     // 見積書と明細を取得
-    const [[estimate]] = await pool.query(
-      'SELECT * FROM estimates WHERE id = ?', [estimate_id]
+    const { rows: estimateRows } = await pool.query(
+      'SELECT * FROM estimates WHERE id = $1', [estimate_id]
     );
+    const estimate = estimateRows[0];
     if (!estimate) return res.status(404).json({ error: '見積書が見つかりません' });
 
     // 二重請求チェック（事前）
-    const [[dup]] = await pool.query(
-      'SELECT id FROM invoices WHERE estimate_id = ?', [estimate_id]
+    const { rows: dupRows } = await pool.query(
+      'SELECT id FROM invoices WHERE estimate_id = $1', [estimate_id]
     );
-    if (dup) {
+    if (dupRows[0]) {
       return res.status(409).json({
         error: 'この見積書の請求書は既に作成されています',
-        invoice_id: dup.id,
+        invoice_id: dupRows[0].id,
       });
     }
 
-    const [estimateItems] = await pool.query(
-      'SELECT * FROM estimate_items WHERE estimate_id = ? ORDER BY line_number',
+    const { rows: estimateItems } = await pool.query(
+      'SELECT * FROM estimate_items WHERE estimate_id = $1 ORDER BY line_number',
       [estimate_id]
     );
 
     const today = new Date().toISOString().slice(0, 10);
-    const conn = await pool.getConnection();
+    const client = await pool.connect();
     try {
-      await conn.beginTransaction();
+      await client.query('BEGIN');
 
-      const invoice_number = await genInvoiceNumber(conn);
+      const invoice_number = await genInvoiceNumber(client);
 
-      const [result] = await conn.query(`
+      const { rows: insertRows } = await client.query(`
         INSERT INTO invoices
           (estimate_id, customer_id, invoice_number, title,
            issue_date, due_date,
            subtotal, tax_rate, tax_amount, total, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING id
       `, [
         estimate_id, estimate.customer_id, invoice_number,
         estimate.title || null,
@@ -145,14 +151,14 @@ export async function createFromEstimate(req, res) {
         estimate.notes || null,
       ]);
 
-      const invoiceId = result.insertId;
+      const invoiceId = insertRows[0].id;
 
       for (const item of estimateItems) {
-        await conn.query(`
+        await client.query(`
           INSERT INTO invoice_items
             (invoice_id, estimate_item_id, line_number, category_name, item_name,
              description, quantity, unit, unit_price, amount)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         `, [
           invoiceId, item.id, item.line_number,
           item.category_name, item.item_name, item.description,
@@ -161,18 +167,18 @@ export async function createFromEstimate(req, res) {
       }
 
       // 見積書の請求ステータスフラグをONに（他のフラグは保持）
-      await conn.query('UPDATE estimates SET status_invoice = 1 WHERE id = ?', [estimate_id]);
+      await client.query('UPDATE estimates SET status_invoice = 1 WHERE id = $1', [estimate_id]);
 
-      await conn.commit();
+      await client.query('COMMIT');
       res.status(201).json({ id: invoiceId, invoice_number });
     } catch (e) {
-      await conn.rollback();
-      if (e.code === 'ER_DUP_ENTRY') {
+      await client.query('ROLLBACK');
+      if (e.code === '23505') {
         return res.status(409).json({ error: 'この見積書の請求書は既に作成されています' });
       }
       throw e;
     } finally {
-      conn.release();
+      client.release();
     }
   } catch (error) {
     res.status(500).json({ error: 'サーバーエラーが発生しました' });
@@ -191,11 +197,11 @@ export async function updatePaymentStatus(req, res) {
       return res.status(400).json({ error: 'paid_dateの形式が正しくありません（YYYY-MM-DD）' });
     }
 
-    const [[existing]] = await pool.query('SELECT id FROM invoices WHERE id = ?', [id]);
-    if (!existing) return res.status(404).json({ error: '請求書が見つかりません' });
+    const { rows: existingRows } = await pool.query('SELECT id FROM invoices WHERE id = $1', [id]);
+    if (!existingRows[0]) return res.status(404).json({ error: '請求書が見つかりません' });
 
     await pool.query(
-      'UPDATE invoices SET payment_status=?, paid_date=? WHERE id=?',
+      'UPDATE invoices SET payment_status=$1, paid_date=$2 WHERE id=$3',
       [Number(payment_status), paid_date || null, id]
     );
 
@@ -213,36 +219,37 @@ export async function updateInvoice(req, res) {
     if (!issue_date) return res.status(400).json({ error: '請求日は必須です' });
     if (!items.length) return res.status(400).json({ error: '明細が1行以上必要です' });
 
-    const [[existing]] = await pool.query(
-      'SELECT id, tax_rate FROM invoices WHERE id = ?', [id]
+    const { rows: existingRows } = await pool.query(
+      'SELECT id, tax_rate FROM invoices WHERE id = $1', [id]
     );
+    const existing = existingRows[0];
     if (!existing) return res.status(404).json({ error: '請求書が見つかりません' });
 
     const subtotal = items.reduce((s, i) => s + (Number(i.amount) || 0), 0);
     const tax_amount = Math.floor(subtotal * Number(existing.tax_rate) / 100);
     const total = subtotal + tax_amount;
 
-    const conn = await pool.getConnection();
+    const client = await pool.connect();
     try {
-      await conn.beginTransaction();
+      await client.query('BEGIN');
 
-      await conn.query(`
+      await client.query(`
         UPDATE invoices
-        SET title=?, issue_date=?, due_date=?,
-            subtotal=?, tax_amount=?, total=?, notes=?
-        WHERE id=?
+        SET title=$1, issue_date=$2, due_date=$3,
+            subtotal=$4, tax_amount=$5, total=$6, notes=$7
+        WHERE id=$8
       `, [title || null, issue_date, due_date || null,
           subtotal, tax_amount, total, notes || null, id]);
 
-      await conn.query('DELETE FROM invoice_items WHERE invoice_id = ?', [id]);
+      await client.query('DELETE FROM invoice_items WHERE invoice_id = $1', [id]);
 
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
-        await conn.query(`
+        await client.query(`
           INSERT INTO invoice_items
             (invoice_id, estimate_item_id, line_number, category_name, item_name,
              description, quantity, unit, unit_price, amount)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         `, [
           Number(id), it.estimate_item_id || null, i + 1,
           it.category_name || null, it.item_name || '',
@@ -252,13 +259,13 @@ export async function updateInvoice(req, res) {
         ]);
       }
 
-      await conn.commit();
+      await client.query('COMMIT');
       res.json({ id: Number(id) });
     } catch (e) {
-      await conn.rollback();
+      await client.query('ROLLBACK');
       throw e;
     } finally {
-      conn.release();
+      client.release();
     }
   } catch (error) {
     res.status(500).json({ error: 'サーバーエラーが発生しました' });

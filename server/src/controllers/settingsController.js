@@ -83,11 +83,11 @@ function validateAndNormalize(body) {
 
 export async function getSettings(req, res) {
   try {
-    const [[settings]] = await pool.query(
+    const { rows } = await pool.query(
       `SELECT ${SETTINGS_COLUMNS} FROM company_settings ORDER BY id LIMIT 1`
     );
-    if (!settings) return res.status(404).json({ error: '自社情報が見つかりません' });
-    res.json(settings);
+    if (!rows[0]) return res.status(404).json({ error: '自社情報が見つかりません' });
+    res.json(rows[0]);
   } catch (error) {
     res.status(500).json({ error: 'サーバーエラーが発生しました' });
   }
@@ -100,16 +100,17 @@ export async function updateSettings(req, res) {
       return res.status(400).json({ error });
     }
 
-    const [[existing]] = await pool.query('SELECT id FROM company_settings ORDER BY id LIMIT 1');
+    const { rows: existingRows } = await pool.query('SELECT id FROM company_settings ORDER BY id LIMIT 1');
+    const existing = existingRows[0];
     if (!existing) return res.status(404).json({ error: '自社情報が見つかりません' });
 
     await pool.query(
       `UPDATE company_settings
-       SET company_name = ?, representative_name = ?, postal_code = ?, address = ?,
-           phone = ?, fax = ?, email = ?, invoice_registration_number = ?,
-           bank_name = ?, bank_branch = ?, bank_account_type = ?, bank_account_number = ?, bank_account_holder = ?,
-           seal_label = ?
-       WHERE id = ?`,
+       SET company_name = $1, representative_name = $2, postal_code = $3, address = $4,
+           phone = $5, fax = $6, email = $7, invoice_registration_number = $8,
+           bank_name = $9, bank_branch = $10, bank_account_type = $11, bank_account_number = $12, bank_account_holder = $13,
+           seal_label = $14
+       WHERE id = $15`,
       [
         values.company_name, values.representative_name, values.postal_code, values.address,
         values.phone, values.fax, values.email, values.invoice_registration_number,
@@ -119,12 +120,12 @@ export async function updateSettings(req, res) {
       ]
     );
 
-    const [[settings]] = await pool.query(
-      `SELECT ${SETTINGS_COLUMNS} FROM company_settings WHERE id = ?`,
+    const { rows } = await pool.query(
+      `SELECT ${SETTINGS_COLUMNS} FROM company_settings WHERE id = $1`,
       [existing.id]
     );
 
-    res.json(settings);
+    res.json(rows[0]);
   } catch (error) {
     res.status(500).json({ error: 'サーバーエラーが発生しました' });
   }

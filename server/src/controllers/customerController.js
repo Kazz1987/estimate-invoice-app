@@ -22,25 +22,25 @@ export async function getCustomers(req, res) {
     const offset = (Number(page) - 1) * Number(limit);
     const likeParam = `%${search}%`;
 
-    const [rows] = await pool.query(
+    const { rows } = await pool.query(
       `SELECT id, name, contact_name, phone, email, created_at
        FROM customers
        WHERE is_deleted = 0
-         AND (name LIKE ? OR contact_name LIKE ?)
+         AND (name ILIKE $1 OR contact_name ILIKE $2)
        ORDER BY id DESC
-       LIMIT ? OFFSET ?`,
+       LIMIT $3 OFFSET $4`,
       [likeParam, likeParam, Number(limit), offset]
     );
 
-    const [[{ total }]] = await pool.query(
+    const { rows: totalRows } = await pool.query(
       `SELECT COUNT(*) AS total
        FROM customers
        WHERE is_deleted = 0
-         AND (name LIKE ? OR contact_name LIKE ?)`,
+         AND (name ILIKE $1 OR contact_name ILIKE $2)`,
       [likeParam, likeParam]
     );
 
-    res.json({ customers: rows, total, page: Number(page), limit: Number(limit) });
+    res.json({ customers: rows, total: totalRows[0].total, page: Number(page), limit: Number(limit) });
   } catch (error) {
     res.status(500).json({ error: 'サーバーエラーが発生しました' });
   }
@@ -49,11 +49,12 @@ export async function getCustomers(req, res) {
 export async function getCustomerById(req, res) {
   try {
     const { id } = req.params;
-    const [[customer]] = await pool.query(
+    const { rows } = await pool.query(
       `SELECT id, name, contact_name, postal_code, address, phone, email, notes
-       FROM customers WHERE id = ? AND is_deleted = 0`,
+       FROM customers WHERE id = $1 AND is_deleted = 0`,
       [id]
     );
+    const customer = rows[0];
     if (!customer) return res.status(404).json({ error: '顧客が見つかりません' });
     res.json(customer);
   } catch (error) {
@@ -70,19 +71,20 @@ export async function createCustomer(req, res) {
       return res.status(400).json({ error: validationError });
     }
 
-    const [result] = await pool.query(
+    const { rows } = await pool.query(
       `INSERT INTO customers (name, contact_name, postal_code, address, phone, email, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id`,
       [name.trim(), contact_name || null, postal_code || null, address || null, phone || null, email || null, notes || null]
     );
 
-    const [[customer]] = await pool.query(
+    const { rows: customerRows } = await pool.query(
       `SELECT id, name, contact_name, postal_code, address, phone, email, notes, created_at
-       FROM customers WHERE id = ?`,
-      [result.insertId]
+       FROM customers WHERE id = $1`,
+      [rows[0].id]
     );
 
-    res.status(201).json(customer);
+    res.status(201).json(customerRows[0]);
   } catch (error) {
     res.status(500).json({ error: 'サーバーエラーが発生しました' });
   }
@@ -98,26 +100,26 @@ export async function updateCustomer(req, res) {
       return res.status(400).json({ error: validationError });
     }
 
-    const [[existing]] = await pool.query(
-      'SELECT id FROM customers WHERE id = ? AND is_deleted = 0',
+    const { rows: existingRows } = await pool.query(
+      'SELECT id FROM customers WHERE id = $1 AND is_deleted = 0',
       [id]
     );
-    if (!existing) return res.status(404).json({ error: '顧客が見つかりません' });
+    if (!existingRows[0]) return res.status(404).json({ error: '顧客が見つかりません' });
 
     await pool.query(
       `UPDATE customers
-       SET name = ?, contact_name = ?, postal_code = ?, address = ?, phone = ?, email = ?, notes = ?
-       WHERE id = ?`,
+       SET name = $1, contact_name = $2, postal_code = $3, address = $4, phone = $5, email = $6, notes = $7
+       WHERE id = $8`,
       [name.trim(), contact_name || null, postal_code || null, address || null, phone || null, email || null, notes || null, id]
     );
 
-    const [[customer]] = await pool.query(
+    const { rows: customerRows } = await pool.query(
       `SELECT id, name, contact_name, postal_code, address, phone, email, notes, updated_at
-       FROM customers WHERE id = ?`,
+       FROM customers WHERE id = $1`,
       [id]
     );
 
-    res.json(customer);
+    res.json(customerRows[0]);
   } catch (error) {
     res.status(500).json({ error: 'サーバーエラーが発生しました' });
   }
@@ -127,14 +129,14 @@ export async function deleteCustomer(req, res) {
   try {
     const { id } = req.params;
 
-    const [[existing]] = await pool.query(
-      'SELECT id FROM customers WHERE id = ? AND is_deleted = 0',
+    const { rows: existingRows } = await pool.query(
+      'SELECT id FROM customers WHERE id = $1 AND is_deleted = 0',
       [id]
     );
-    if (!existing) return res.status(404).json({ error: '顧客が見つかりません' });
+    if (!existingRows[0]) return res.status(404).json({ error: '顧客が見つかりません' });
 
     await pool.query(
-      'UPDATE customers SET is_deleted = 1 WHERE id = ?',
+      'UPDATE customers SET is_deleted = 1 WHERE id = $1',
       [id]
     );
 

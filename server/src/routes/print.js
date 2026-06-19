@@ -8,15 +8,15 @@ const router = Router();
 // ─── データ取得ヘルパー ───────────────────────────────────────────────────────
 
 async function fetchCompanySettings() {
-  const [[company]] = await pool.query(
+  const { rows } = await pool.query(
     `SELECT company_name, postal_code, address, phone, fax, email, invoice_registration_number
      FROM company_settings ORDER BY id LIMIT 1`
   );
-  return company || null;
+  return rows[0] || null;
 }
 
 async function fetchEstimate(id) {
-  const [[doc]] = await pool.query(`
+  const { rows: docRows } = await pool.query(`
     SELECT e.id, e.estimate_number, e.title,
            e.issue_date, e.expiry_date,
            e.status_estimate, e.status_order, e.status_delivery, e.status_invoice,
@@ -25,21 +25,22 @@ async function fetchEstimate(id) {
            c.name AS customer_name, c.contact_name, c.address
     FROM estimates e
     JOIN customers c ON c.id = e.customer_id
-    WHERE e.id = ?
+    WHERE e.id = $1
   `, [id]);
+  const doc = docRows[0];
   if (!doc) return null;
 
-  const [items] = await pool.query(`
+  const { rows: items } = await pool.query(`
     SELECT category_name, item_name, description,
            quantity, unit, unit_price, amount
-    FROM estimate_items WHERE estimate_id = ? ORDER BY line_number
+    FROM estimate_items WHERE estimate_id = $1 ORDER BY line_number
   `, [id]);
 
   return { ...doc, items };
 }
 
 async function fetchInvoice(id) {
-  const [[doc]] = await pool.query(`
+  const { rows: docRows } = await pool.query(`
     SELECT inv.id, inv.invoice_number, inv.title,
            inv.issue_date, inv.due_date,
            inv.subtotal, inv.tax_rate, inv.tax_amount, inv.total,
@@ -47,14 +48,15 @@ async function fetchInvoice(id) {
            c.name AS customer_name, c.contact_name, c.address
     FROM invoices inv
     JOIN customers c ON c.id = inv.customer_id
-    WHERE inv.id = ?
+    WHERE inv.id = $1
   `, [id]);
+  const doc = docRows[0];
   if (!doc) return null;
 
-  const [items] = await pool.query(`
+  const { rows: items } = await pool.query(`
     SELECT category_name, item_name, description,
            quantity, unit, unit_price, amount
-    FROM invoice_items WHERE invoice_id = ? ORDER BY line_number
+    FROM invoice_items WHERE invoice_id = $1 ORDER BY line_number
   `, [id]);
 
   return { ...doc, items };

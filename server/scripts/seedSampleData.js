@@ -120,50 +120,47 @@ const ESTIMATES = [
 ];
 
 async function main() {
-  const conn = await pool.getConnection();
+  const client = await pool.connect();
   try {
-    await conn.beginTransaction();
+    await client.query('BEGIN');
 
     // ---- トランザクションデータ・品目マスタをクリア（company_settingsは保持） ----
-    await conn.query('SET FOREIGN_KEY_CHECKS = 0');
-    await conn.query('TRUNCATE TABLE invoice_items');
-    await conn.query('TRUNCATE TABLE invoices');
-    await conn.query('TRUNCATE TABLE estimate_items');
-    await conn.query('TRUNCATE TABLE estimates');
-    await conn.query('TRUNCATE TABLE customers');
-    await conn.query('TRUNCATE TABLE items');
-    await conn.query('TRUNCATE TABLE item_categories');
-    await conn.query('SET FOREIGN_KEY_CHECKS = 1');
+    // RESTART IDENTITYでID連番を1から振り直し、CASCADEで関連テーブルのFK制約に対応
+    await client.query(
+      `TRUNCATE TABLE invoice_items, invoices, estimate_items, estimates, customers, items, item_categories
+       RESTART IDENTITY CASCADE`
+    );
 
     // ---- 品目マスタ投入 ----
     const categoryIds = {};
     for (let i = 0; i < CATEGORIES.length; i++) {
-      const [result] = await conn.query(
-        'INSERT INTO item_categories (name, sort_order) VALUES (?, ?)',
+      const { rows } = await client.query(
+        'INSERT INTO item_categories (name, sort_order) VALUES ($1, $2) RETURNING id',
         [CATEGORIES[i], i + 1]
       );
-      categoryIds[CATEGORIES[i]] = result.insertId;
+      categoryIds[CATEGORIES[i]] = rows[0].id;
     }
 
     const itemIds = {};
     for (let i = 0; i < ITEMS.length; i++) {
       const it = ITEMS[i];
-      const [result] = await conn.query(
-        'INSERT INTO items (category_id, name, unit, unit_price, sort_order) VALUES (?, ?, ?, ?, ?)',
+      const { rows } = await client.query(
+        'INSERT INTO items (category_id, name, unit, unit_price, sort_order) VALUES ($1, $2, $3, $4, $5) RETURNING id',
         [categoryIds[it.category], it.name, it.unit, it.unitPrice, i + 1]
       );
-      itemIds[it.name] = result.insertId;
+      itemIds[it.name] = rows[0].id;
     }
 
     // ---- 顧客投入 ----
     const customerIds = [];
     for (const c of CUSTOMERS) {
-      const [result] = await conn.query(
+      const { rows } = await client.query(
         `INSERT INTO customers (name, contact_name, postal_code, address, phone, email)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id`,
         [c.name, c.contact_name, c.postal_code, c.address, c.phone, c.email]
       );
-      customerIds.push(result.insertId);
+      customerIds.push(rows[0].id);
     }
 
     // ---- 見積書・請求書投入（古い順に処理して番号を年ごとに連番化） ----
@@ -195,31 +192,33 @@ async function main() {
       const total = subtotal + taxAmount;
       const flags = STAGE_FLAGS[e.stage];
 
-      const [estResult] = await conn.query(
+      const { rows: estRows } = await client.query(
         `INSERT INTO estimates
            (customer_id, estimate_number, title, issue_date, expiry_date,
             status_estimate, status_order, status_delivery, status_invoice,
             subtotal, tax_rate, tax_amount, total)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         RETURNING id`,
         [
           customerIds[e.customer], estimateNumber, e.title, ymd(issueDate), ymd(addDays(issueDate, 30)),
           flags[0], flags[1], flags[2], flags[3],
           subtotal, TAX_RATE, taxAmount, total,
         ]
       );
-      const estimateId = estResult.insertId;
+      const estimateId = estRows[0].id;
       estimateCount++;
 
       const estimateItemIds = [];
       for (let i = 0; i < lineItems.length; i++) {
         const li = lineItems[i];
-        const [itemResult] = await conn.query(
+        const { rows: itemRows } = await client.query(
           `INSERT INTO estimate_items
              (estimate_id, item_id, line_number, category_name, item_name, quantity, unit, unit_price, amount)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           RETURNING id`,
           [estimateId, itemIds[li.name], i + 1, li.category, li.name, li.qty, li.unit, li.unitPrice, li.amount]
         );
-        estimateItemIds.push(itemResult.insertId);
+        estimateItemIds.push(itemRows[0].id);
       }
 
       if (e.stage === 'D') {
@@ -234,39 +233,40 @@ async function main() {
         invoiceSeq[year] = (invoiceSeq[year] || 0) + 1;
         const invoiceNumber = `INV-${year}-${String(invoiceSeq[year]).padStart(4, '0')}`;
 
-        const [invResult] = await conn.query(
+        const { rows: invRows } = await client.query(
           `INSERT INTO invoices
              (estimate_id, customer_id, invoice_number, title, issue_date, due_date,
               subtotal, tax_rate, tax_amount, total, payment_status, paid_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+           RETURNING id`,
           [
             estimateId, customerIds[e.customer], invoiceNumber, e.title, ymd(issueDate), ymd(dueDate),
             subtotal, TAX_RATE, taxAmount, total, paymentStatus, paidDate,
           ]
         );
-        const invoiceId = invResult.insertId;
+        const invoiceId = invRows[0].id;
         invoiceCount++;
 
         for (let i = 0; i < lineItems.length; i++) {
           const li = lineItems[i];
-          await conn.query(
+          await client.query(
             `INSERT INTO invoice_items
                (invoice_id, estimate_item_id, line_number, category_name, item_name, quantity, unit, unit_price, amount)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
             [invoiceId, estimateItemIds[i], i + 1, li.category, li.name, li.qty, li.unit, li.unitPrice, li.amount]
           );
         }
       }
     }
 
-    await conn.commit();
+    await client.query('COMMIT');
     console.log(`完了: 顧客${customerIds.length}件 / 品目${ITEMS.length}件 / 見積${estimateCount}件 / 請求${invoiceCount}件`);
   } catch (error) {
-    await conn.rollback();
+    await client.query('ROLLBACK');
     console.error('シード投入に失敗しました:', error);
     process.exitCode = 1;
   } finally {
-    conn.release();
+    client.release();
     await pool.end();
   }
 }

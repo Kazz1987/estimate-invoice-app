@@ -14,34 +14,34 @@ export async function getDashboardSummary(req, res) {
 
     let invoiceWhere = '1=1';
     const invoiceParams = [];
-    if (date_from) { invoiceWhere += ' AND issue_date >= ?'; invoiceParams.push(date_from); }
-    if (date_to)   { invoiceWhere += ' AND issue_date <= ?'; invoiceParams.push(date_to); }
+    if (date_from) { invoiceParams.push(date_from); invoiceWhere += ` AND issue_date >= $${invoiceParams.length}`; }
+    if (date_to)   { invoiceParams.push(date_to); invoiceWhere += ` AND issue_date <= $${invoiceParams.length}`; }
 
     let estimateWhere = '1=1';
     const estimateParams = [];
-    if (date_from) { estimateWhere += ' AND issue_date >= ?'; estimateParams.push(date_from); }
-    if (date_to)   { estimateWhere += ' AND issue_date <= ?'; estimateParams.push(date_to); }
+    if (date_from) { estimateParams.push(date_from); estimateWhere += ` AND issue_date >= $${estimateParams.length}`; }
+    if (date_to)   { estimateParams.push(date_to); estimateWhere += ` AND issue_date <= $${estimateParams.length}`; }
 
-    const [[{ invoiceTotal }]] = await pool.query(`
-      SELECT COALESCE(SUM(total), 0) AS invoiceTotal
+    const { rows: invoiceTotalRows } = await pool.query(`
+      SELECT COALESCE(SUM(total), 0) AS "invoiceTotal"
       FROM invoices
       WHERE ${invoiceWhere}
     `, invoiceParams);
 
-    const [[{ pendingEstimateCount }]] = await pool.query(`
-      SELECT COUNT(*) AS pendingEstimateCount
+    const { rows: pendingRows } = await pool.query(`
+      SELECT COUNT(*) AS "pendingEstimateCount"
       FROM estimates
       WHERE ${estimateWhere}
         AND status_estimate = 1 AND status_order = 0 AND status_delivery = 0 AND status_invoice = 0
     `, estimateParams);
 
-    const [[{ estimateCount }]] = await pool.query(`
-      SELECT COUNT(*) AS estimateCount
+    const { rows: estimateCountRows } = await pool.query(`
+      SELECT COUNT(*) AS "estimateCount"
       FROM estimates
       WHERE ${estimateWhere}
     `, estimateParams);
 
-    const [[statusCounts]] = await pool.query(`
+    const { rows: statusCountsRows } = await pool.query(`
       SELECT
         SUM(status_estimate) AS estimate,
         SUM(status_order) AS order_,
@@ -50,8 +50,9 @@ export async function getDashboardSummary(req, res) {
       FROM estimates
       WHERE ${estimateWhere}
     `, estimateParams);
+    const statusCounts = statusCountsRows[0];
 
-    const [unpaidInvoices] = await pool.query(`
+    const { rows: unpaidInvoices } = await pool.query(`
       SELECT inv.id, inv.invoice_number, inv.issue_date, inv.due_date, inv.total,
              c.name AS customer_name
       FROM invoices inv
@@ -61,9 +62,9 @@ export async function getDashboardSummary(req, res) {
     `);
 
     res.json({
-      monthlyInvoiceTotal: Number(invoiceTotal),
-      pendingEstimateCount: Number(pendingEstimateCount),
-      monthlyEstimateCount: Number(estimateCount),
+      monthlyInvoiceTotal: Number(invoiceTotalRows[0].invoiceTotal),
+      pendingEstimateCount: Number(pendingRows[0].pendingEstimateCount),
+      monthlyEstimateCount: Number(estimateCountRows[0].estimateCount),
       statusCounts: {
         estimate: Number(statusCounts.estimate) || 0,
         order: Number(statusCounts.order_) || 0,
