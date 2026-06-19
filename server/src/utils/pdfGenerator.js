@@ -1,5 +1,8 @@
 import puppeteer from 'puppeteer-core';
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { Browser, getInstalledBrowsers } from '@puppeteer/browsers';
 
 const BROWSER_PATHS = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -11,25 +14,49 @@ const BROWSER_PATHS = [
   '/usr/bin/chromium',
 ];
 
-function findBrowser() {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    const envPath = process.env.PUPPETEER_EXECUTABLE_PATH;
+// puppeteer-core単体ではキャッシュ管理機能を持たないため、@puppeteer/browsers の
+// Cache APIで実際にインストールされているChromeのパスを動的に解決する。
+// 固定パス（PUPPETEER_EXECUTABLE_PATH）は再デプロイでビルドキャッシュの内容が
+// ずれるとファイルが存在しなくなることがあるため、フォールバックとしてのみ使う。
+async function findInstalledChromeViaCache() {
+  const cacheDir = process.env.PUPPETEER_CACHE_DIR || join(homedir(), '.cache', 'puppeteer');
+  try {
+    const installed = await getInstalledBrowsers({ cacheDir });
     console.error(
-      `[pdfGenerator] PUPPETEER_EXECUTABLE_PATH=${envPath} (存在: ${existsSync(envPath)})`
+      `[pdfGenerator] @puppeteer/browsers cacheDir=${cacheDir} installed=${JSON.stringify(
+        installed.map((b) => ({ browser: b.browser, buildId: b.buildId, executablePath: b.executablePath }))
+      )}`
     );
-    return envPath;
+    const chrome = installed.find((b) => b.browser === Browser.CHROME && existsSync(b.executablePath));
+    return chrome?.executablePath ?? null;
+  } catch (error) {
+    console.error(`[pdfGenerator] キャッシュ探索失敗 cacheDir=${cacheDir} error.message=${error.message}`);
+    return null;
   }
+}
+
+async function findBrowser() {
+  const envPath = process.env.PUPPETEER_EXECUTABLE_PATH;
+  if (envPath) {
+    const exists = existsSync(envPath);
+    console.error(`[pdfGenerator] PUPPETEER_EXECUTABLE_PATH=${envPath} (存在: ${exists})`);
+    if (exists) return envPath;
+  }
+
+  const cachedPath = await findInstalledChromeViaCache();
+  if (cachedPath) return cachedPath;
 
   for (const p of BROWSER_PATHS) {
     if (existsSync(p)) return p;
   }
+
   throw new Error(
-    'Chrome / Edge が見つかりません。PUPPETEER_EXECUTABLE_PATH 環境変数で実行パスを指定してください。'
+    'Chrome / Edge が見つかりません。PUPPETEER_EXECUTABLE_PATH 環境変数、または @puppeteer/browsers のキャッシュ、固定パスのいずれにも実行ファイルがありませんでした。'
   );
 }
 
 export async function htmlToPdf(html) {
-  const executablePath = findBrowser();
+  const executablePath = await findBrowser();
 
   let browser;
   try {
